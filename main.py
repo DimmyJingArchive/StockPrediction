@@ -13,7 +13,7 @@ import os
 
 max_time = 30
 batch_size = 1
-pred_input_series = 90
+pred_input_series = 30
 
 
 symbols = ['AIRT', 'ATSG', 'ALK', 'ALGT', 'AAL', 'ARCB', 'ASC', 'AAWW', 'AVH',
@@ -65,6 +65,7 @@ def input_fn(fn_type):
                 symbol = symbols[np.random.randint(len(symbols))]
                 stock_date, stock_data = get_stock(symbol)
                 rand_idx = np.random.randint(len(stock_date) - max_time)
+                rand_idx = 0
                 yield {}, {i: np.flip(j[rand_idx:rand_idx + max_time], 0)
                            for i, j in stock_data.items() if i == 'close'}
         elif fn_type == 'predict':
@@ -72,6 +73,7 @@ def input_fn(fn_type):
             stock_date, orig_stock_data = get_stock(symbol)
             rand_idx = np.random.randint(len(stock_date) -
                                          pred_input_series)
+            rand_idx = 0
             stock_data = {i: np.flip(j[rand_idx:rand_idx +
                                        pred_input_series], 0)
                           for i, j in orig_stock_data.items() if i == 'close'}
@@ -357,19 +359,20 @@ class neural_network():
                            if self.features else None)
         label_columns = (tf.feature_column.input_layer(
                          self._label_placeholders, label_columns))
-        # self._normalize_ratio = tf.reduce_max(label_columns)
-        # label_columns /= self._normalize_ratio
+        self._debug_ops.append(label_columns)
+        label_columns, first_val = (label_columns[1:, :] -
+                                    label_columns[:-1, :],
+                                    label_columns[0, :])
         y, state = self._generate_hidden_layers(feature_columns,
                                                 label_columns[:-1, :],
                                                 len(self.labels.keys()),
                                                 hidden_units, dropout,
                                                 cell_type)
-        # label_columns *= self._normalize_ratio
+        self._debug_ops.append(label_columns)
         self._debug_ops.append(y)
-        # y *= self._normalize_ratio
         self._step = tf.Variable(0, name='global_step', trainable=False)
         self._evaluate_fn = self._get_evaluation(y, label_columns[1:, :])
-        self._predict_fn = self._get_result(y)
+        self._predict_fn = self._get_result(first_val, y)
         self._cost_fn = self._get_cost(y, label_columns[1:, :], cost_fn)
         optimizer = tf.train.AdamOptimizer(learning_rate, beta1,
                                            beta2, epsilon)
@@ -409,8 +412,8 @@ class neural_network():
     def _get_evaluation(self, y, y_true):
         return tf.reduce_mean(tf.abs(y-y_true))
 
-    def _get_result(self, y):
-        return y
+    def _get_result(self, first_val, y):
+        return tf.scan(lambda i, j: i + j, tf.concat([[first_val], y], 0))
 
     def _get_cost(self, y, y_true, cost_fn):
         return (cost_fn(y_true, y) if cost_fn is not None else
@@ -418,8 +421,9 @@ class neural_network():
 
 
 rnn = neural_network({}, {'close': 'numeric'},
-                     hidden_units=[128, 128, 128, 128], debug=False)
-# """
+                     hidden_units=[128, 128, 128, 128], debug=False,
+                     cell_type=tf.nn.rnn_cell.GRUCell)
+"""
 while True:
     rnn.train(input_fn('train'), 100)
     rnn.evaluate(input_fn('evaluate'), 100)
