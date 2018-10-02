@@ -2,99 +2,18 @@ from pandas.tseries.holiday import USFederalHolidayCalendar
 from pandas.tseries.offsets import CustomBusinessDay
 from subprocess import check_output
 import matplotlib.pyplot as plt
+from datetime import datetime
 import tensorflow as tf
 import pandas as pd
 import numpy as np
-import datetime
-import pathlib
+import random
 import csv
 import os
 
 
-max_time = 30
-batch_size = 1
-pred_input_series = 30
-
-
-symbols = ['AIRT', 'ATSG', 'ALK', 'ALGT', 'AAL', 'ARCB', 'ASC', 'AAWW', 'AVH',
-           'AZUL', 'BSTI', 'BCO', 'BRS', 'CHRW', 'CNI', 'CP', 'CPLP', 'CEA',
-           'ZNH', 'VLRS', 'CPA', 'CAAP', 'CMRE', 'CVTI', 'CYRX', 'CYRXW',
-           'CSX', 'DAC', 'DAL', 'DHT', 'DCIX', 'DSX', 'DSXN', 'LPG', 'DRYS',
-           'EGLE', 'ECHO', 'ERA', 'EURN', 'ESEA', 'EXPD', 'FDX', 'FWRD',
-           'FRO', 'GNK', 'GWR', 'GSL', 'GLBS', 'GOL', 'GRIN', 'OMAB', 'PAC',
-           'ASR', 'GSH', 'HA', 'HTLD', 'HUBG', 'HUNT', 'HUNTU', 'HUNTW',
-           'JBHT', 'JBLU', 'KSU', 'KSU', 'KNX', 'LSTR', 'LTM', 'MRTN',
-           'NVGS', 'NNA', 'NM', 'NMM', 'NAO', 'NSC', 'ODFL', 'OSG', 'PTSI',
-           'PANL', 'PATI', 'PHII', 'PHIIK', 'PXS', 'RLGT', 'RRTS', 'RYAAY',
-           'SB', 'SAIA', 'SNDR', 'SALT', 'SLTB', 'SBBC', 'SBNA', 'STNG',
-           'CKH', 'SMHI', 'SHIP', 'SHIPW', 'SSW', 'SSWA', 'SSWN', 'SFL',
-           'SINO', 'SKYW', 'LUV', 'SAVE', 'SBLK', 'SBLKZ', 'GASS', 'TK',
-           'TOPS', 'TRMD', 'TNP', 'USX', 'UNP', 'UAL', 'UPS', 'ULH', 'USAK',
-           'USDP', 'WERN', 'YRCW', 'ZTO']
-
-
-symbols = ['AIRT']
-
-
-use_symbols = symbols[:10]
-
-
-stock_keys = ['date', 'open', 'high', 'low', 'close', 'volume']
-stock_types = {i: [lambda i: datetime.datetime.strptime(i, '%Y-%m-%d'),
-                   float, float, float, float, int][idx]
-               for idx, i in enumerate(stock_keys)}
-
-
-def get_stock(symbol):
-    with open('./Data/{}.csv'.format(symbol)) as f:
-        data = {i: [] for i in stock_keys}
-        reader = csv.reader(f)
-        next(reader)
-        for row in reader:
-            for i, j in zip(stock_keys, row):
-                data[i].append(stock_types[i](j))
-        date = np.array(data.pop('date'))
-        return (np.array(date, dtype=np.datetime64),
-                {i: np.array(j) for i, j in data.items()})
-
-
-def input_fn(fn_type):
-    def generator(features, labels, *args):
-        if fn_type in ['train', 'evaluate']:
-            for i in range(args[0]):
-                symbol = symbols[np.random.randint(len(symbols))]
-                stock_date, stock_data = get_stock(symbol)
-                rand_idx = np.random.randint(len(stock_date) - max_time)
-                rand_idx = 0
-                yield {}, {i: np.flip(j[rand_idx:rand_idx + max_time], 0)
-                           for i, j in stock_data.items() if i == 'close'}
-        elif fn_type == 'predict':
-            symbol = symbols[np.random.randint(len(symbols))]
-            stock_date, orig_stock_data = get_stock(symbol)
-            rand_idx = np.random.randint(len(stock_date) -
-                                         pred_input_series)
-            rand_idx = 0
-            stock_data = {i: np.flip(j[rand_idx:rand_idx +
-                                       pred_input_series], 0)
-                          for i, j in orig_stock_data.items() if i == 'close'}
-            yield ({}, stock_data, {'symbol': symbol,
-                                    'date': np.flip(stock_date, 0),
-                                    'data': {i: np.flip(j, 0) for i, j in
-                                             orig_stock_data.items()},
-                                    'idx': rand_idx})
-    return generator
-
-
-def get_dates(start_date, num_days):
-    start_date += np.timedelta64(1, 'D')
-    us_bd = CustomBusinessDay(calendar=USFederalHolidayCalendar())
-    dates = pd.date_range(start_date, periods=num_days, freq=us_bd)
-    return np.array(dates.to_pydatetime(), dtype=np.datetime64)
-
-
-def plot_stock(date, data, symbol):
-    plt.plot(date, data['close'], label=symbol)
-    plt.legend()
+batch_size = 30
+time_series = 40
+model_size = [128, 128, 128, 128]
 
 
 class JimoLoadingBar():
@@ -129,309 +48,159 @@ class JimoLoadingBar():
               end='', flush=True)
 
 
-class custom_hook():
-    def __init__(self, estimator):
-        self.estimator = estimator
-
-    def begin_train(self, *args):
-        pass
-
-    def begin_train_step(self, *args):
-        pass
-
-    def after_train_step(self, *args):
-        pass
-
-    def after_train(self, *args):
-        pass
-
-    def begin_evaluate(self, *args):
-        pass
-
-    def begin_evaluate_step(self, *args):
-        pass
-
-    def after_evaluate_step(self, *args):
-        pass
-
-    def after_evaluate(self, *args):
-        pass
-
-
-class LoggingHook(custom_hook):
-    def begin_train(self, *args):
-        self.step = 0
-        self.num_steps = args[0]
-        self.cost = 0.
-        self.loading_bar = JimoLoadingBar(pending=self.num_steps)
-        self.loading_bar.prefix = 'training |'
-        self.loading_bar.postfix = ('|{_processed:5} /{_pending:5}, '
-                                    '{percentage:7.2%}, cost: {cost:.2E}')
-        self.loading_bar.phases = ' ▏▎▍▌▋▊▉█'
-        self.pending = self.estimator.step + self.num_steps
-
-    def begin_train_step(self, *args):
-        self.step += 1
-        self.loading_bar.update(self.step, {'_processed': self.estimator.step,
-                                            '_pending': self.pending,
-                                            'cost': self.cost})
-
-    def after_train_step(self, *args):
-        self.loading_bar.update(self.step, {'_processed': self.estimator.step,
-                                            '_pending': self.pending,
-                                            'cost': args[0]})
-        self.cost = args[0]
-
-    def after_train(self, *args):
-        self.step += 1
-        self.loading_bar.update(self.step, {'_processed': self.estimator.step,
-                                            '_pending': self.pending,
-                                            'cost': self.cost})
-        self.estimator.save()
-        print()
-
-    def begin_evaluate(self, *args):
-        print('\033[1mbegin evaluation...\033[0m\t\t\t\t', end='', flush=True)
-
-    def after_evaluate(self, *args):
-        # accuracy, max, min, stddev
-        print('\r\033[1maccuracy: \033[93m{0:.2}\033[0m'
-              '        \033[1mstandard deviation: \033[93m{3:.2}\033[0m'
-              '        \033[1mmax: \033[93m{1:.2}\033[0m'
-              '        \033[1mmin: \033[93m{2:.2}\033[0m'.format(*args))
+def read_stocks(symbol, return_date=False, reverse=True):
+    date = []
+    value = []
+    with open('data/{}'.format(symbol)) as f:
+        reader = csv.reader(f)
+        next(reader)
+        try:
+            for row in reader:
+                if row == []:
+                    break
+                if return_date:
+                    date.append(datetime.strptime(row[0], '%d-%b-%y'))
+                value.append(float(row[4]))
+        except ValueError:
+            for row in reader:
+                if row == []:
+                    break
+                if return_date:
+                    date.append(datetime.strptime(row[0], '%Y-%m-%d'))
+                value.append(float(row[4]))
+    if return_date:
+        if (date[0] < date[1]):
+            return np.array(date), np.array(value)
+        return np.flip(np.array(date), 0), np.flip(np.array(value), 0)
+    elif reverse:
+        return np.flip(np.array(value), 0)
+    else:
+        return np.array(value)
 
 
-def change_checkpoint(instance_name, checkpoint_path):
-    with open('./.model/'+instance_name+'/checkpoint') as f:
-        lines = f.readlines()
-    lines[0] = ('model_checkpoint_path: '
-                '"{}"\n'.format(os.path.basename(checkpoint_path)))
-    with open('./.model/'+instance_name+'/checkpoint', 'w') as f:
-        f.writelines(lines)
+def normalize(data):
+    new_data = np.array([(np.append([0], i) -
+                          np.append(i, [0]))[:-1] for i in data])
+    return np.negative(new_data[:, 0]), np.array(new_data[:, 1:])
 
 
-def get_checkpoint(instance_name):
-    with open('./.model/'+instance_name+'/checkpoint') as f:
-        return './.model/'+instance_name+'/'+f.readlines()[0].split('"')[1]
+def recover(start, data):
+    new_data = []
+    for start_num, i in zip(start, data):
+        new_data.append([start_num])
+        for j in i:
+            new_data[-1].append(new_data[-1][-1] + j)
+    return np.array(new_data)
 
 
-class neural_network():
-    def __init__(self, features, labels, hidden_units=[128],
-                 learning_rate=.001, beta1=.9, beta2=.999, epsilon=1e-8,
-                 dropout=0., cost_fn=None,
-                 cell_type=tf.contrib.rnn.LayerNormBasicLSTMCell, debug=False,
-                 **kwargs):
-        tf.reset_default_graph()
-        self.name = 'stockRegressor'
-        self.features = features
-        self.labels = labels
-        self._hook = LoggingHook(self)
-        self._debug = debug
-        self._debug_ops = []
-        self._initialize_layers(hidden_units, learning_rate, beta1, beta2,
-                                epsilon, dropout, cost_fn, cell_type)
-        self._saver = tf.train.Saver(max_to_keep=10)
-        self._sess = tf.Session()
-        self._merge = tf.summary.merge_all()
-        if pathlib.Path('./.model/'+self.name+'/checkpoint').exists():
-            self._saver.restore(self._sess, get_checkpoint(self.name))
-        else:
-            self._sess.run((tf.global_variables_initializer(),
-                            tf.tables_initializer()))
-            pathlib.Path('./.model/'+self.name).mkdir(parents=True,
-                                                      exist_ok=True)
-        self._writer = tf.summary.FileWriter('./.model/'+self.name,
-                                             self._sess.graph)
-
-    def train(self, batch_fn, steps):
-        if not self._debug:
-            self._hook.begin_train(steps)
-        for feature_batch, label_batch in batch_fn(self.features,
-                                                   self.labels, steps):
-            feed_dict = {self._feature_placeholders[i]:
-                         feature_batch[i] for i in self.features.keys()}
-            labels = {self._label_placeholders[i]: label_batch[i] for i in
-                      self.labels.keys()}
-            feed_dict.update(labels)
-            if not self._debug:
-                self._hook.begin_train_step()
-            summary, _, cost, debug = self._sess.run((self._merge,
-                                                      self._train_fn,
-                                                      self._cost_fn,
-                                                      self._debug_ops),
-                                                     feed_dict)
-            if self._debug:
-                print(debug)
-            self._writer.add_summary(summary, self.step)
-            if not self._debug:
-                self._hook.after_train_step(cost)
-        if not self._debug:
-            self._hook.after_train()
-
-    def evaluate(self, batch_fn, num_steps):
-        accuracy = []
-        if not self._debug:
-            self._hook.begin_evaluate()
-        for feature_batch, label_batch in batch_fn(self.features, self.labels,
-                                                   num_steps):
-            feed_dict = {self._feature_placeholders[i]:
-                         feature_batch[i] for i in self.features.keys()}
-            labels = {self._label_placeholders[i]: label_batch[i] for i in
-                      self.labels.keys()}
-            feed_dict.update(labels)
-            if not self._debug:
-                self._hook.begin_evaluate_step()
-            summary, result, debug = self._sess.run((self._merge,
-                                                     self._evaluate_fn,
-                                                     self._debug_ops),
-                                                    feed_dict)
-            if self._debug:
-                print(debug)
-            self._writer.add_summary(summary, self.step)
-            if not self._debug:
-                self._hook.after_evaluate_step()
-            accuracy.append(result)
-        max = np.max(accuracy)
-        min = np.min(accuracy)
-        stddev = np.std(accuracy)
-        accuracy = np.mean(accuracy)
-        if not self._debug:
-            self._hook.after_evaluate(accuracy, max, min, stddev)
-        return accuracy
-
-    def predict(self, batch_fn, predict_length):
-        for feature_batch, label_batch, batch_info in batch_fn(self.features,
-                                                               self.labels):
-            feed_dict = {self._feature_placeholders[i]:
-                         feature_batch[i] for i in self.features.keys()}
-            labels = {self._label_placeholders[i]: label_batch[i] for i in
-                      self.labels.keys()}
-            feed_dict.update(labels)
-            pred_values = {i: [] for i in self.labels.keys()}
-            for idx in range(predict_length):
-                summary, result, debug = self._sess.run((self._merge,
-                                                         self._predict_fn,
-                                                         self._debug_ops),
-                                                        feed_dict)
-                if self._debug:
-                    print(debug)
-                for idx, i in enumerate(self._label_order):
-                    key = self._label_placeholders[i]
-                    feed_dict[key] = np.concatenate((feed_dict[key][1:],
-                                                     [result[-1, idx]]))
-                    pred_values[i].append(result[-1, idx])
-                self._writer.add_summary(summary, self.step)
-            yield pred_values, batch_info
-
-    def save(self, checkpoint=True):
-        pathlib.Path('./.model/'+self.name).mkdir(parents=True, exist_ok=True)
-        if checkpoint:
-            self._saver.save(self._sess, './.model/{0}/{0}'.format(self.name),
-                             global_step=self.step)
-        else:
-            self._saver.save(self._sess, './.model/{0}/{0}'.format(self.name))
-
-    def close(self):
-        self._sess.close()
-
-    @property
-    def step(self):
-        return self._sess.run(self._step)
-
-    def _initialize_layers(self, hidden_units, learning_rate, beta1, beta2,
-                           epsilon, dropout, cost_fn, cell_type):
-        self._feature_placeholders = {}
-        self._label_placeholders = {}
-        self._label_order = []
-        feature_columns = []
-        label_columns = []
-        for i, j in self.features.items():
-            placeholder, column = self._generate_placeholder(i, j)
-            self._feature_placeholders[i] = placeholder
-            feature_columns.append(column)
-        for i, j in self.labels.items():
-            placeholder, column = self._generate_placeholder(i, j)
-            self._label_placeholders[i] = placeholder
-            self._label_order.append(i)
-            label_columns.append(column)
-        feature_columns = (tf.feature_column.input_layer(
-                           self._feature_placeholders, feature_columns)
-                           if self.features else None)
-        label_columns = (tf.feature_column.input_layer(
-                         self._label_placeholders, label_columns))
-        self._debug_ops.append(label_columns)
-        label_columns, first_val = (label_columns[1:, :] -
-                                    label_columns[:-1, :],
-                                    label_columns[0, :])
-        y, state = self._generate_hidden_layers(feature_columns,
-                                                label_columns[:-1, :],
-                                                len(self.labels.keys()),
-                                                hidden_units, dropout,
-                                                cell_type)
-        self._debug_ops.append(label_columns)
-        self._debug_ops.append(y)
-        self._step = tf.Variable(0, name='global_step', trainable=False)
-        self._evaluate_fn = self._get_evaluation(y, label_columns[1:, :])
-        self._predict_fn = self._get_result(first_val, y)
-        self._cost_fn = self._get_cost(y, label_columns[1:, :], cost_fn)
-        optimizer = tf.train.AdamOptimizer(learning_rate, beta1,
-                                           beta2, epsilon)
-        self._train_fn = optimizer.minimize(self._cost_fn, self._step,
-                                            name='Train')
-        tf.summary.histogram('cost', self._evaluate_fn)
-
-    def _generate_placeholder(self, name, info):
-        fc = tf.feature_column
-        ph, ic, ccvl, cchb = (tf.placeholder, fc.indicator_column,
-                              fc.categorical_column_with_vocabulary_list,
-                              fc.categorical_column_with_hash_bucket)
-        if type(info) is dict:
-            if info['type'] == 'vocab':
-                placeholder = ph(tf.string, shape=[None], name=name)
-                return placeholder, ic(ccvl(name, info['vocab']))
-            elif info['type'] == 'hash':
-                placeholder = ph(tf.string, shape=[None], name=name)
-                return placeholder, ic(cchb(name, info['num_buckets']))
-        else:
-            if info == 'numeric':
-                placeholder = ph(tf.float32, shape=[None], name=name)
-                return placeholder, tf.feature_column.numeric_column(name)
-        raise NotImplementedError('type {} not supported'.format(
-                                info['type'] if type(info) is dict else info))
-
-    def _generate_hidden_layers(self, feature_columns, label_columns,
-                                num_labels, hidden_units, dropout, cell_type):
-        label_columns = tf.expand_dims(label_columns, 0)
-        cells = [cell_type(num_units=i) for i in hidden_units]
-        cells = tf.nn.rnn_cell.MultiRNNCell(cells)
-        cells = tf.contrib.rnn.OutputProjectionWrapper(cells, num_labels)
-        result, state = tf.nn.dynamic_rnn(cells, label_columns,
-                                          dtype=label_columns.dtype)
-        return tf.squeeze(result, [0]), state
-
-    def _get_evaluation(self, y, y_true):
-        return tf.reduce_mean(tf.abs(y-y_true))
-
-    def _get_result(self, first_val, y):
-        return tf.scan(lambda i, j: i + j, tf.concat([[first_val], y], 0))
-
-    def _get_cost(self, y, y_true, cost_fn):
-        return (cost_fn(y_true, y) if cost_fn is not None else
-                tf.losses.mean_squared_error(y_true, y))
+def get_dates(start_date, num_days):
+    us_bd = CustomBusinessDay(calendar=USFederalHolidayCalendar())
+    dates = pd.date_range(start_date, periods=num_days, freq=us_bd)
+    return np.array(dates.to_pydatetime(), dtype=np.datetime64)
 
 
-rnn = neural_network({}, {'close': 'numeric'},
-                     hidden_units=[128, 128, 128, 128], debug=False,
-                     cell_type=tf.nn.rnn_cell.GRUCell)
-"""
-while True:
-    rnn.train(input_fn('train'), 100)
-    rnn.evaluate(input_fn('evaluate'), 100)
-# """
-for result, info in rnn.predict(input_fn('predict'), 1000):
-    plot_stock(info['date'], info['data'], info['symbol'])
-    idx = info['idx'] + pred_input_series
-    dates = get_dates(info['date'][idx], len(next(iter(result.values()))))
-    plot_stock(dates, result, 'Prediction')
+def get_model():
+    # batch_size, time_series
+    placeholder = tf.placeholder(tf.float32, shape=(None, None))
+    stock_values = tf.expand_dims(placeholder, 2)
 
-plt.show()
+    x_data = stock_values[:, :-1]
+    y_data = stock_values[:, 1:]
+
+    cell = [tf.nn.rnn_cell.GRUCell(i) for i in model_size]
+    cell = tf.nn.rnn_cell.MultiRNNCell(cell)
+    cell = tf.contrib.rnn.OutputProjectionWrapper(cell, 1)
+    val, _ = tf.nn.dynamic_rnn(cell, x_data, dtype=tf.float32)
+    y_data, val = tf.squeeze(y_data, [2]), tf.squeeze(val, [2])
+
+    cost = tf.losses.mean_squared_error(y_data, val)
+    train_fn = tf.train.AdamOptimizer().minimize(cost)
+
+    eval_max = tf.reduce_max(tf.abs(val - y_data))
+    eval_min = tf.reduce_min(tf.abs(val - y_data))
+    eval_mean, eval_var = tf.nn.moments(tf.reshape(val - y_data, [-1]), [0])
+
+    pred_fn = tf.concat((y_data[:, 0:1], val), 1)
+
+    return (placeholder, train_fn, (eval_mean, eval_max, eval_min, eval_var),
+            pred_fn)
+
+
+def get_data():
+    data = []
+    for i in range(batch_size):
+        value = read_stocks(random.choice(os.listdir('./data/')))
+        index = np.random.randint(len(value) - time_series)
+        data.append(value[index:index + time_series])
+    return normalize(np.array(data))
+
+
+def get_pred_data():
+    date, data = read_stocks(random.choice(os.listdir('./data/')),
+                             return_date=True)
+    index = np.random.randint(len(date) - time_series)
+    start, data = normalize(np.array([data[index:index + time_series]]))
+    date = np.array([date[index:index + time_series]])
+    return start, date, data
+
+
+def train_model(session, placeholder, train_fn, data_fn, steps):
+    bar = JimoLoadingBar(steps)
+    bar.update(0)
+    for i in range(steps):
+        start, data = data_fn()
+        session.run(train_fn, {placeholder: data})
+        bar.update(i)
+    bar.update(steps)
+    print()
+
+
+def eval_model(session, placeholder, eval_fn, data_fn):
+    start, data = data_fn()
+    mean, _max, _min, var = sess.run(eval_fn, {placeholder: data})
+    print('mean: {:.3f}, max: {:.3f}, '
+          'min: {:.3f}, var: {:.3f}'.format(abs(mean), _max, _min, var))
+    return mean, _max, _min, var
+
+
+def predict_model(session, placeholder, pred_fn, data_fn, length):
+    start, date, data = data_fn()
+    result = session.run(pred_fn, {placeholder: data})
+    prediction = np.copy(result[:, :-1])
+    for i in range(length):
+        prediction = np.append(prediction, result[:, -1:], axis=1)
+        result = sess.run(pred_fn, {placeholder: prediction[:, -time_series:]})
+    prediction = np.append(prediction, result[:, -1:], axis=1)
+    prediction = recover(start, prediction)
+    dates = np.array([get_dates(date[i][0], len(prediction[i]))
+                     for i in range(len(date))])
+    data = recover(start, data)
+    return date, data, dates, prediction
+
+
+if __name__ == '__main__':
+    print('initializing model...')
+    placeholder, train_fn, eval_fn, pred_fn = get_model()
+    sess = tf.Session()
+    saver = tf.train.Saver()
+    try:
+        saver.restore(sess, tf.train.latest_checkpoint('./.model/'))
+    except ValueError:
+        sess.run(tf.global_variables_initializer())
+
+    # """
+    date, data, dates, prediction = predict_model(sess, placeholder, pred_fn,
+                                                  get_pred_data, 100)
+    plt.plot(date[0], data[0], dates[0], prediction[0])
+    plt.show()
+    # """
+
+    """
+    try:
+        for i in range(100):
+            train_model(sess, placeholder, train_fn, get_data, 100)
+            mean, _max, _min, var = eval_model(sess, placeholder,
+                                            eval_fn, get_data)
+    except KeyboardInterrupt:
+        saver.save(sess, './.model/model')
+    # """
